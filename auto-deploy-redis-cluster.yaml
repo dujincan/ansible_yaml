@@ -1,0 +1,48 @@
+- hosts: all
+  gather_facts: no
+  tasks:
+  - name: create foler
+    file:
+      path: '{{ item }}'
+      state: directory
+    with_items:
+      - /server/tools
+      - /apps
+      - /data/7001
+      - /data/7002
+  - name: tar redis pkg
+    unarchive:
+      src: /etc/ansible/file/redis-3.2.12.tar.gz
+      dest: /apps/ 
+      remote_src: no
+  - name: install redis
+    shell: make
+    args:
+      chdir: /apps/redis-3.2.12
+  - name: link redis
+    file:
+      src: /apps/redis-3.2.12 
+      dest: /apps/redis 
+      state: link
+  - name: install ruby
+    yum:
+      name: 
+        - ruby 
+        - rubygems
+      state: present
+  - name: install ruby for redis
+    shell: gem sources -a http://mirrors.aliyun.com/rubygems/ --remove http://rubygems.org/ && gem install redis -v 3.3.3 
+  - name: copy redis conf
+    copy:
+      src: '/etc/ansible/file/redis/{{ item.src }}'
+      dest: '/data/{{ item.dest }}'
+    with_items:
+      - {src: '7001/redis.conf', dest: '7001/redis.conf'}
+      - {src: '7002/redis.conf', dest: '7002/redis.conf'}
+  - name: start redis
+    shell: '/apps/redis/src/redis-server {{ item }}'
+    with_items:
+      - /data/7001/redis.conf
+      - /data/7002/redis.conf
+
+

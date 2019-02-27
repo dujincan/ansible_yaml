@@ -1,0 +1,99 @@
+- hosts: all
+  gather_facts: no
+  tasks:
+  - name: create folder
+    file: 
+      path: "{{ item }}" 
+      state: directory
+    with_items:
+      - /server/tools
+      - /apps
+      - /data
+  - name: create mysql user
+    user:
+      name: mysql
+      shell: /sbin/nologin
+      create_home: no
+      state: present
+  - name: chown data to mysql
+    file:
+      path: /data
+      owner: mysql
+      group: mysql
+      mode: 0755
+  - name: unarchive mysql pkg
+    unarchive:
+      src: /etc/ansible/file/mysql-5.6.36.tar.gz
+      dest: /apps
+  - name: install cmake
+    yum:
+      name: "{{ packages }}"
+    vars:
+      packages:
+      - cmake
+      - ncurses-devel
+      - ansible
+      - MySQL-python
+  - name: cmake mysql
+    shell: cmake . -DCMAKE_INSTALL_PREFIX=/apps/mysql-5.6.36 -DMYSQL_DATADIR=/data -DMYSQL_UNIX_ADDR=/tmp/mysql.sock -DDEFAULT_CHARSET=utf8 -DDEFAULT_COLLATION=utf8_general_ci -DWITH_EXTRA_CHARSETS=all -DWITH_INNOBASE_STORAGE_ENGINE=1 -DWITH_FEDERATED_STORAGE_ENGINE=1 -DWITH_BLACKHOLE_STORAGE_ENGINE=1 -DWITHOUT_EXAMPLE_STORAGE_ENGINE=1 -DWITH_ZLIB=bundled -DWITH_SSL=bundled -DENABLED_LOCAL_INFILE=1 -DWITH_EMBEDDED_SERVER=1 -DENABLE_DOWNLOADS=1 -DWITH_DEBUG=0
+    args:
+      chdir: /apps/mysql-5.6.36/
+  - name: install mysql
+    shell: make && make install
+    args:
+      chdir: /apps/mysql-5.6.36/
+  - name: link mysql folder
+    file:
+      src: /apps/mysql-5.6.36
+      dest: /apps/mysql
+      state: link
+  - name: chmod x 
+    file:
+      path: /apps/mysql-5.6.36/scripts/mysql_install_db
+      owner: root
+      group: root
+      mode: 0755
+  - name: init mysql db
+    shell: ./mysql_install_db --basedir=/apps/mysql --datadir=/data --user=mysql
+    args:
+        chdir: /apps/mysql/scripts/
+  - name: copy my.cnf to /etc
+    copy: 
+      src: '{{ item.src }}'
+      dest: '{{ item.dest }}'
+      backup: yes
+    with_items:
+      - { src: '/etc/ansible/hosts', dest: '/tmp/hosts' }
+      - { src: '/etc/ansible/file/my.cnf', dest: '/etc/my.cnf' }
+  - name: change serverid
+    shell: sed -e "/server-id/s#100#`echo $RANDOM`#g" /etc/my.cnf -i
+  - name: start mysql
+    shell: ./mysqld_safe &
+    args:
+      chdir: /apps/mysql/bin/
+- hosts: master
+  gather_facts: no
+  tasks:
+  - name: create repl user
+    mysql_user:
+      name: repl
+      password: 123
+      host: '10.0.0.%'
+      login_unix_socket: /tmp/mysql.sock
+      priv: '*.*:REPLICATION SLAVE'
+      state: present
+- hosts: slave
+  gather_facts: no
+  tasks:
+  - name: change master
+    mysql_replication:
+      mode: changemaster
+      login_unix_socket: /tmp/mysql.sock
+      master_host: 10.0.0.11
+      master_user: repl
+      master_password: 123
+      master_auto_position: 1
+  - name: start slave
+    mysql_replication:
+      mode: startslave
+      login_unix_socket: /tmp/mysql.sock

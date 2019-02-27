@@ -1,0 +1,108 @@
+- hosts: all
+  gather_facts: no
+  tasks:
+  - name: install perl-DBD-MySQL
+    yum:
+      name: perl-DBD-MySQL
+      state: present
+  - name: copy node pkg
+    copy:
+      src: /etc/ansible/file/mha4mysql-node-0.56-0.el6.noarch.rpm
+      dest: /server/tools/mha4mysql-node-0.56-0.el6.noarch.rpm
+  - name: install node
+    yum:
+      name: /server/tools/mha4mysql-node-0.56-0.el6.noarch.rpm
+      state: present
+  - name: link mysql
+    file:
+      src: '{{ item.src }}'
+      dest: '{{ item.dest }}'
+      state: link
+    with_items:
+      - { src: '/apps/mysql/bin/mysql', dest: '/usr/bin/mysql' }
+      - { src: '/apps/mysql/bin/mysqlbinlog', dest: '/usr/bin/mysqlbinlog' }
+
+
+- hosts: 10.0.0.12
+  gather_facts: no
+  tasks:
+  - name: create mha user
+    mysql_user:
+      name: mha
+      password: mha
+      priv: '*.*:ALL'
+      host: '10.0.0.%'
+      login_unix_socket: /tmp/mysql.sock
+  - name: install perl tools
+    yum:
+      name:
+        - perl-Config-Tiny 
+        - epel-release 
+        - perl-Log-Dispatch 
+        - perl-Parallel-ForkManager 
+        - perl-Time-HiRes
+      state: present
+  - name: copy mha manager pkg
+    copy:
+      src: /etc/ansible/file/mha4mysql-manager-0.56-0.el6.noarch.rpm
+      dest: /server/tools/mha4mysql-manager-0.56-0.el6.noarch.rpm
+  - name: install mha manager
+    yum:
+      name: /server/tools/mha4mysql-manager-0.56-0.el6.noarch.rpm
+      state: present
+  - name: create mha folder
+    file:
+      path: '{{ item }}'
+      state: directory
+    with_items:
+      - /etc/mha
+      - /var/log/mha/app1
+  - name: copy mha conf file
+    copy:
+      src: /etc/ansible/file/app1.cnf
+      dest: /etc/mha/app1.cnf
+
+  
+- hosts: all
+  gather_facts: no
+  tasks:
+  - name: root id_isa
+    user:
+      name: root
+      generate_ssh_key: yes
+      ssh_key_bits: 2048
+      ssh_key_file: .ssh/id_isa
+
+
+- hosts: 10.0.0.11
+  gather_facts: no
+  tasks:
+  - name: id_isa.pub
+    shell: cat /root/.ssh/id_isa.pub
+    register: pub11
+
+- hosts: 10.0.0.12
+  gather_facts: no
+  tasks:
+  - name: id_isa.pub
+    shell: cat /root/.ssh/id_isa.pub
+    register: pub12
+
+- hosts: 10.0.0.13
+  gather_facts: no
+  tasks:
+  - name: id_isa.pub
+    shell: cat /root/.ssh/id_isa.pub
+    register: pub13
+
+- hosts: all
+  gather_facts: no
+  tasks:
+  - name:
+    shell: echo "{{ pub11.stdout }}" >> /root/.ssh/authorized_key && echo "{{ pub12.stdout }}" >> /root/.ssh/authorized_key && echo "{{ pub12.stdout }}" >> /root/.ssh/authorized_key
+
+- hosts: 10.0.0.12      
+  gather_facts: no
+  tasks:
+  - name: start mha
+    shell: nohup masterha_manager --conf=/etc/mha/app1.cnf --remove_dead_master_conf --ignore_last_failover < /dev/null > /var/log/mha/app1/manager.log 2>&1 & 
